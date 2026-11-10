@@ -13,10 +13,10 @@ Standard and Russian): `akuo` -> `שלום` -> `флгщ` -> back to `akuo`.
 ## Install (Windows, one line in cmd)
 
 ```
-curl -L -o "%TEMP%\ls.zip" https://github.com/Markuzio-krantz/layout-switcher/archive/refs/heads/main.zip && "%SystemRoot%\System32	ar.exe" -xf "%TEMP%\ls.zip" -C "%TEMP%" && python "%TEMP%\layout-switcher-main\install.py"
+curl -L -o "%TEMP%\ls.zip" https://github.com/Markuzio-krantz/layout-switcher/archive/refs/heads/main.zip && "%SystemRoot%\System32\tar.exe" -xf "%TEMP%\ls.zip" -C "%TEMP%" && python "%TEMP%\layout-switcher-main\install.py"
 ```
 
-( is named in full because Git for Windows can put its own  first on PATH, and that one cannot read zip files.)
+(`tar.exe` is named in full because Git for Windows can put its own `tar` first on PATH, and that one cannot read zip files.)
 
 Or with git:
 
