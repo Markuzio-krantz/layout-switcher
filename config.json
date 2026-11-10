@@ -1,0 +1,20 @@
+{
+  "hotkey": "ctrl+shift+space",
+  "preference": [
+    "he",
+    "en",
+    "ru"
+  ],
+  "switch_layout_after": true,
+  "cycle_seconds": 10,
+  "line_copy_apps": [
+    "code.exe",
+    "code - insiders.exe",
+    "cursor.exe",
+    "windsurf.exe",
+    "sublime_text.exe",
+    "idea64.exe",
+    "pycharm64.exe",
+    "webstorm64.exe"
+  ]
+}
