@@ -1,13 +1,25 @@
-"""Windows plumbing: clipboard save/restore, synthetic keys, input-language switch.
+"""Windows backend: layouts, clipboard save/restore, synthetic keys, input-language switch.
 
 No keyboard hook is installed anywhere; keys are only *sent*, after a hotkey press.
+The hotkey itself (RegisterHotKey) lives in windows_hotkey.py.
 """
 from __future__ import annotations
 
 import ctypes
 import json
+import os
 import time
 from ctypes import wintypes as w
+
+from convert import Layout
+
+from .windows_hotkey import notify, serve, stop  # noqa: F401  (backend interface)
+
+NAME = "windows"
+LOG_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "layout-switcher")
+# Ctrl+C there kills the running program, so the switcher only beeps.
+CONSOLES = {"cmd.exe", "powershell.exe", "pwsh.exe", "conhost.exe", "windowsterminal.exe",
+            "wt.exe", "openconsole.exe", "mintty.exe", "bash.exe", "wsl.exe"}
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -389,3 +401,72 @@ def switch_input_language(hkl: int) -> None:
 
 def beep() -> None:
     user32.MessageBeep(0x30)
+
+
+def configure(cfg: dict) -> None:
+    pass  # everything Windows needs is read from the system on each press
+
+
+def trigger() -> bool:
+    """`switcher.py --convert` is handled in-process on Windows (the hotkey is the normal way)."""
+    return False
+
+
+# ---- layouts: every key's character comes from ToUnicodeEx -----------------------
+# Typing keys: number row, three letter rows, and the ISO key next to left Shift.
+SCANCODES = (
+    tuple(range(0x02, 0x0E)) + tuple(range(0x10, 0x1C)) + tuple(range(0x1E, 0x2A))
+    + (0x2B,) + tuple(range(0x2C, 0x36)) + (0x56,)
+)
+LANG_NAMES = {0x09: "en", 0x0D: "he", 0x19: "ru"}  # primary language id -> short name
+
+user32.GetKeyboardLayoutList.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+user32.ToUnicodeEx.argtypes = [w.UINT, w.UINT, ctypes.POINTER(ctypes.c_ubyte), w.LPWSTR,
+                               ctypes.c_int, w.UINT, ctypes.c_void_p]
+user32.MapVirtualKeyExW.argtypes = [w.UINT, w.UINT, ctypes.c_void_p]
+user32.MapVirtualKeyExW.restype = w.UINT
+MAPVK_VSC_TO_VK_EX = 3
+TU_NO_STATE_CHANGE = 0x4  # Windows 10 1607+: do not touch the dead-key state
+
+
+def _signed(h: int) -> int:
+    return h - (1 << 64) if h >= 1 << 63 else h
+
+
+def lang_name(hkl: int) -> str:
+    lang = hkl & 0xFFFF
+    return LANG_NAMES.get(lang & 0x3FF, f"{lang:04x}")
+
+
+def _char(vk: int, sc: int, hkl: int, shift: bool) -> str:
+    state = (ctypes.c_ubyte * 256)()
+    if shift:
+        state[VK_SHIFT] = 0x80
+    buf = ctypes.create_unicode_buffer(8)
+    r = user32.ToUnicodeEx(vk, sc, state, buf, 8, TU_NO_STATE_CHANGE, hkl)
+    if r < 0:  # dead key: flush it and ignore
+        user32.ToUnicodeEx(vk, sc, state, buf, 8, TU_NO_STATE_CHANGE, hkl)
+        return ""
+    return buf.value[:r] if r == 1 else ""
+
+
+def installed_hkls() -> list[int]:
+    n = user32.GetKeyboardLayoutList(0, None)
+    arr = (ctypes.c_void_p * n)()
+    user32.GetKeyboardLayoutList(n, arr)
+    return [_signed(a or 0) for a in arr]
+
+
+def load_layouts() -> list[Layout]:
+    """Layout.handle is the HKL, so switch_input_language can select it."""
+    layouts = []
+    for hkl in installed_hkls():
+        keys = {}
+        for sc in SCANCODES:
+            vk = user32.MapVirtualKeyExW(sc, MAPVK_VSC_TO_VK_EX, hkl)
+            for shift in (False, True):
+                ch = _char(vk, sc, hkl, shift)
+                if ch:
+                    keys[(sc, shift)] = ch
+        layouts.append(Layout(lang_name(hkl), hkl, keys))
+    return layouts

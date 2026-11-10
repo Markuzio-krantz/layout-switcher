@@ -15,6 +15,14 @@
     "sublime_text.exe",
     "idea64.exe",
     "pycharm64.exe",
-    "webstorm64.exe"
-  ]
+    "webstorm64.exe",
+    "com.microsoft.vscode",
+    "com.todesktop.230313mzl4w4u92",
+    "com.sublimetext.4",
+    "code",
+    "codium",
+    "cursor",
+    "sublime_text"
+  ],
+  "xkb_layouts": ""
 }

@@ -30,7 +30,7 @@ def script_of(ch: str) -> str | None:
 @dataclass
 class Layout:
     name: str
-    hkl: int
+    hkl: int | str  # platform handle: Windows HKL, macOS input source ID, Linux layout index
     keys: dict[Key, str]
     rev: dict[str, Key] = field(init=False)
     script: str | None = field(init=False)
