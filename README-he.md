@@ -24,7 +24,7 @@ curl -fsSL https://github.com/Markuzio-krantz/layout-switcher/archive/refs/heads
 
 | מערכת | תיקיית ההתקנה | הפעלה אוטומטית |
 |---|---|---|
-| Windows | `%LOCALAPPDATA%\Programs\LayoutSwitcher` | ערך אחד במפתח Run של המשתמש. מופיע במנהל המשימות, בלשונית "אפליקציות אתחול", ושם אפשר לכבות אותו |
+| Windows | `%LOCALAPPDATA%\Programs\LayoutSwitcher` | ערך אחד במפתח Run של המשתמש (מופיע במנהל המשימות, בלשונית "אפליקציות אתחול"), ומשימה מתוזמנת בשם `LayoutSwitcher Watchdog` שבודקת כל 5 דקות אם הכלי רץ ומפעילה אותו אם משהו הרג אותו. אחרי `stop.cmd` המשימה לא מפעילה אותו עד ההפעלה הבאה |
 | macOS | `~/Library/Application Support/LayoutSwitcher` | LaunchAgent ב-`~/Library/LaunchAgents` |
 | Linux | `~/.local/share/layout-switcher` | קובץ `layout-switcher.desktop` ב-`~/.config/autostart` |
 

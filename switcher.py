@@ -221,6 +221,46 @@ def setup_logging() -> None:
 _crash_file = None  # kept open for the life of the process (faulthandler writes into it)
 
 
+def _stop_flag() -> str:
+    """Exists while the user has stopped the tool on purpose; the watchdog respects it."""
+    return os.path.join(io.LOG_DIR, "stopped-by-user")
+
+
+def _clear_stop_flag() -> None:
+    try:
+        os.remove(_stop_flag())
+    except OSError:
+        pass
+
+
+def ensure() -> int:
+    """Watchdog entry (Windows Task Scheduler, every few minutes): start the tool if it
+    is not running and the user did not stop it. On 10-11/11 the switcher and its
+    supervisor vanished together twice with nothing logged, i.e. killed from outside;
+    a scheduled task lives outside any terminal or app that may kill its children."""
+    if os.path.exists(_stop_flag()) or io.NAME != "windows":
+        return 0
+    import ctypes
+    from backends.windows_hotkey import STOP_EVENT
+    k32 = ctypes.WinDLL("kernel32")
+    k32.OpenEventW.restype = ctypes.c_void_p
+    h = k32.OpenEventW(0x0002, False, STOP_EVENT)
+    if h:
+        k32.CloseHandle(ctypes.c_void_p(h))
+        return 0
+    import subprocess
+    setup_logging()
+    log.warning("watchdog: the switcher was not running and was not stopped by the user; starting it")
+    pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    args = [pyw if os.path.exists(pyw) else sys.executable, os.path.abspath(__file__), "--supervise"]
+    DETACHED, NEW_GROUP, BREAKAWAY = 0x00000008, 0x00000200, 0x01000000
+    try:
+        subprocess.Popen(args, creationflags=DETACHED | NEW_GROUP | BREAKAWAY)
+    except OSError:  # the caller's job forbids breakaway
+        subprocess.Popen(args, creationflags=DETACHED | NEW_GROUP)
+    return 0
+
+
 def supervise() -> int:
     """Run the switcher as a child and restart it if it dies while running.
 
@@ -229,6 +269,7 @@ def supervise() -> int:
     it once is better than a loop. Otherwise restart, at most 5 times an hour."""
     import subprocess
     setup_logging()
+    _clear_stop_flag()
     args = [sys.executable, os.path.abspath(__file__)] + [a for a in sys.argv[1:]
                                                           if a != "--supervise"]
     restarts: list[float] = []
@@ -294,7 +335,12 @@ def convert_once() -> int:
 
 def main() -> int:
     if "--stop" in sys.argv:
+        os.makedirs(io.LOG_DIR, exist_ok=True)
+        with open(_stop_flag(), "w", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S\n"))
         return io.stop()
+    if "--ensure" in sys.argv:
+        return ensure()
     if "--convert" in sys.argv:
         return convert_once()
     if "--supervise" in sys.argv:

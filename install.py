@@ -70,6 +70,13 @@ def copy_files() -> None:
 
 def start_now() -> None:
     if WIN:
+        flag = os.path.join(os.environ.get("LOCALAPPDATA", HOME), "layout-switcher", "stopped-by-user")
+        if os.path.exists(flag):  # stop_running() set it; installing means "run it"
+            os.remove(flag)
+        # Through Task Scheduler when the watchdog task exists: then the tool is not a child
+        # of this installer or of whatever terminal ran it.
+        if subprocess.run(["schtasks", "/run", "/tn", TASK], capture_output=True).returncode == 0:
+            return
         subprocess.Popen([python(), SWITCHER, "--supervise"], creationflags=0x00000008)  # DETACHED_PROCESS
     else:
         subprocess.Popen([python(), SWITCHER, "--supervise"], start_new_session=True, stdin=subprocess.DEVNULL,
@@ -81,8 +88,25 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_NAME = "LayoutSwitcher"
 
 
+TASK = "LayoutSwitcher Watchdog"
+
+
+def watchdog_windows(on: bool) -> None:
+    """A per-user scheduled task that runs `switcher.py --ensure` every 5 minutes: it
+    starts the tool if something killed it (not if the user stopped it). Runs from Task
+    Scheduler, so it does not depend on whichever program happened to start the tool."""
+    subprocess.run(["schtasks", "/delete", "/f", "/tn", TASK], capture_output=True)
+    if on:
+        r = subprocess.run(["schtasks", "/create", "/f", "/tn", TASK, "/sc", "minute", "/mo", "5",
+                            "/tr", f'"{python()}" "{SWITCHER}" --ensure'],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            print("watchdog task not created:", (r.stderr or r.stdout).strip())
+
+
 def autostart_windows(on: bool) -> None:
     import winreg
+    watchdog_windows(on)
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
         if on:
             winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, f'"{python()}" "{SWITCHER}" --supervise')
