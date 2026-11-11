@@ -3,12 +3,19 @@ train / held-out by FILE (not by word), so the test words come from documents th
 model never saw. Nothing leaves the machine; the trained models live in
 %LOCALAPPDATA%\\layout-switcher\\lm (macOS ~/Library/Application Support/layout-switcher/lm,
 Linux ~/.local/state/layout-switcher/lm), outside the repo, because their counts are
-statistics of Mark's private notes.
+statistics of the user's own private texts.
+
+Which folders to learn from is set per machine in corpus.json next to the models'
+folder (never in the repo), e.g.
+  {"he": ["C:/Users/me/Notes"], "en": ["C:/Users/me/Books"], "ru": ["C:/Users/me/Books"]}
+Each folder is searched for *.md and *.txt. Without the file, every language reads
+the Documents folder.
 """
 from __future__ import annotations
 
 import glob
 import hashlib
+import json
 import os
 import sys
 from collections.abc import Iterator
@@ -16,8 +23,6 @@ from collections.abc import Iterator
 from convert import CYRILLIC, HEBREW, LATIN, script_of
 
 HOME = os.path.expanduser("~")
-VAULT = os.path.join(HOME, "Documents", "MyVault", "MarkSpaceIt")
-BOOKS = os.path.join(HOME, "Documents", "STUDY", "BOOKS", "_text")
 if os.name == "nt":
     MODEL_DIR = os.path.join(os.environ.get("LOCALAPPDATA", HOME), "layout-switcher", "lm")
 elif sys.platform == "darwin":
@@ -26,12 +31,25 @@ else:  # next to the log, outside the install folder, so an uninstall keeps the 
     MODEL_DIR = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state"),
                              "layout-switcher", "lm")
 
-# language -> (script, list of (root, glob pattern))
-SOURCES = {
-    "he": (HEBREW, [(VAULT, "**/*.md")]),
-    "en": (LATIN, [(BOOKS, "**/*.txt")]),
-    "ru": (CYRILLIC, [(BOOKS, "**/*.txt"), (VAULT, "**/*.md")]),
-}
+CORPUS_CONFIG = os.path.join(os.path.dirname(MODEL_DIR), "corpus.json")
+SCRIPTS = {"he": HEBREW, "en": LATIN, "ru": CYRILLIC}
+
+
+def _load_sources() -> dict[str, tuple[str, list[tuple[str, str]]]]:
+    """language -> (script, list of (root, glob pattern))"""
+    try:
+        with open(CORPUS_CONFIG, encoding="utf-8") as f:
+            dirs = json.load(f)
+    except (OSError, ValueError):
+        dirs = {}
+    out = {}
+    for lang, script in SCRIPTS.items():
+        roots = dirs.get(lang) or [os.path.join(HOME, "Documents")]
+        out[lang] = (script, [(r, p) for r in roots for p in ("**/*.md", "**/*.txt")])
+    return out
+
+
+SOURCES = _load_sources()
 SKIP_DIRS = (".git", "node_modules", ".claude", "archive")
 STRIP = "\"“”„«»()[]{}*_`<>"  # wrappers removed from both ends; , . ; : ' stay (they are keys)
 ALLOWED = set(",.;:'!?-")      # non-letters a word may still contain
