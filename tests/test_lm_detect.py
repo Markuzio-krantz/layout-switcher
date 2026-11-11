@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from corpus import words_in  # noqa: E402
 from convert import HEBREW, LATIN  # noqa: E402
-from detect import fixture_layouts, judge  # noqa: E402
+from detect import fixture_layouts, judge, suspect_span  # noqa: E402
 from lm import EOS, CharLM  # noqa: E402
 
 EN_WORDS = "hello world the and this that with have from there their would about which".split()
@@ -70,6 +70,20 @@ class Detector(unittest.TestCase):
     def test_mixed_sentence(self):
         flagged = [t for t in "hello akuo world".split() if judge(t, self.layouts, self.lms).flagged()]
         self.assertEqual(flagged, ["akuo"])
+
+
+    def span(self, text):
+        s = suspect_span(text, self.layouts, self.lms)
+        return None if s is None else text[s[0]:s[1]]
+
+    def test_suspect_span_keeps_real_words_out(self):
+        self.assertEqual(self.span("hello akuo"), "akuo")
+        self.assertEqual(self.span("ghbdtn world"), "ghbdtn")
+        self.assertEqual(self.span("hello akuo 12 ghbdtn the"), "akuo 12 ghbdtn")
+
+    def test_suspect_span_none_when_all_real(self):
+        self.assertIsNone(self.span("hello world"))
+        self.assertIsNone(self.span("12 ,."))
 
 
 class Corpus(unittest.TestCase):

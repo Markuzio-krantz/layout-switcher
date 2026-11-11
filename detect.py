@@ -72,6 +72,42 @@ def looks_already_correct(text: str, layouts: list[Layout], lms: dict[str, CharL
     return sum(v.flagged(threshold) for v in judged) * 2 < len(judged)
 
 
+def suspect_span(text: str, layouts: list[Layout], lms: dict[str, CharLM],
+                 real_margin: float = -THRESHOLD) -> tuple[int, int] | None:
+    """Char span from the first to the last word that is NOT confidently real.
+
+    A word is confidently real when no conversion of it beats it, or the best one loses
+    by more than |real_margin| bits/char. Letterless tokens never decide. Returns None
+    when every word looks real (the caller then converts everything, as in stage 1).
+    """
+    first = last = None
+    i, n = 0, len(text)
+    while i < n:
+        if text[i].isspace():
+            i += 1
+            continue
+        j = i
+        while j < n and not text[j].isspace():
+            j += 1
+        v = judge(text[i:j], layouts, lms)
+        if v is not None and v.dst is not None and v.margin >= real_margin:
+            first = i if first is None else first
+            last = j
+        i = j
+    return None if first is None else (first, last)
+
+
+def best_target(text: str, layouts: list[Layout], lms: dict[str, CharLM]) -> str | None:
+    """The language the flagged words of `text` most likely belong to (margins summed
+    per language), or None when no word is flagged."""
+    votes: dict[str, float] = {}
+    for tok in text.split():
+        v = judge(tok, layouts, lms)
+        if v is not None and v.flagged():
+            votes[v.dst] = votes.get(v.dst, 0.0) + v.margin
+    return max(votes, key=votes.get) if votes else None
+
+
 def load_lms(names: list[str]) -> dict[str, CharLM]:
     from train_lm import model_path
     return {n: CharLM.load(model_path(n)) for n in names if os.path.exists(model_path(n))}

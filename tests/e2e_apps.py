@@ -46,7 +46,11 @@ CASES = [
                               "אני כותב akuo"]),
     ("יקךךם", True, ["hello"]),                                        # he -> en
     ("Hi שלום", False, ["Hi akuo", "Hi флгщ"]),   # he -> en -> ru (capital: Word autocapitalises)
-    ("Руддщ црщ", False, ["יקךךם 'ים", "Hello who"]),                  # ru -> he -> en
+    ("Руддщ црщ", False, ["Hello who", "יקךךם 'ים"]),   # ru -> en (model's guess first) -> he
+    # stage 2: real words around the wrong-layout ones stay as they are
+    ("hello akuo", False, ["hello שלום", "hello флгщ", "hello akuo"]),
+    ("I think ghbdtn world", False, ["I think привет world", "I think עינגאמ world"]),
+    ("ghbdtn", True, ["привет"]),                                      # selection: guess first
 ]
 
 
@@ -109,7 +113,7 @@ def press_and_wait(timeout: float = 15) -> None:
     end = time.time() + timeout
     while done_count() == before and time.time() < end:
         time.sleep(0.1)
-    time.sleep(0.4)
+    time.sleep(1.0)  # the app may insert the paste a moment after the log line (slow under load)
 
 
 def press_hotkey() -> None:

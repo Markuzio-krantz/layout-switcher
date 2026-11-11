@@ -70,9 +70,9 @@ def copy_files() -> None:
 
 def start_now() -> None:
     if WIN:
-        subprocess.Popen([python(), SWITCHER], creationflags=0x00000008)  # DETACHED_PROCESS
+        subprocess.Popen([python(), SWITCHER, "--supervise"], creationflags=0x00000008)  # DETACHED_PROCESS
     else:
-        subprocess.Popen([python(), SWITCHER], start_new_session=True, stdin=subprocess.DEVNULL,
+        subprocess.Popen([python(), SWITCHER, "--supervise"], start_new_session=True, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -85,7 +85,7 @@ def autostart_windows(on: bool) -> None:
     import winreg
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
         if on:
-            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, f'"{python()}" "{SWITCHER}"')
+            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, f'"{python()}" "{SWITCHER}" --supervise')
         else:
             try:
                 winreg.DeleteValue(k, RUN_NAME)
@@ -108,7 +108,7 @@ def autostart_macos(on: bool) -> None:
         return
     os.makedirs(os.path.dirname(PLIST), exist_ok=True)
     with open(PLIST, "wb") as f:
-        plistlib.dump({"Label": LABEL, "ProgramArguments": [python(), SWITCHER],
+        plistlib.dump({"Label": LABEL, "ProgramArguments": [python(), SWITCHER, "--supervise"],
                        "RunAtLoad": True, "ProcessType": "Interactive"}, f)
     subprocess.run(["launchctl", "bootstrap", domain, PLIST], capture_output=True)
 
@@ -129,7 +129,7 @@ def autostart_linux(on: bool) -> None:
     with open(DESKTOP, "w", encoding="utf-8") as f:
         f.write("[Desktop Entry]\nType=Application\nName=Layout Switcher\n"
                 "Comment=Converts text typed in the wrong keyboard layout\n"
-                f'Exec="{python()}" "{SWITCHER}"\nTerminal=false\nNoDisplay=true\n'
+                f'Exec="{python()}" "{SWITCHER}" --supervise\nTerminal=false\nNoDisplay=true\n'
                 "X-GNOME-Autostart-enabled=true\n")
 
 

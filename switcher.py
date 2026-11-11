@@ -14,6 +14,9 @@ Press the hotkey with text selected -> the selection is converted.
 With nothing selected -> the trailing run of the current line that is in one
 alphabet (e.g. "akuo nv" after Hebrew text) is converted.
 Press again within `cycle_seconds` -> next language; the last press restores the original.
+Stage 2: with nothing selected, words the local language model is confident are real
+(e.g. "hello" in "hello akuo") are left out of the run at its start and end. Needs the
+models from train_lm.py; without them, or with "smart_run": false, stage-1 behaviour.
 """
 from __future__ import annotations
 
@@ -30,7 +33,7 @@ sys.path.insert(0, HERE)
 import backends  # noqa: E402
 from convert import Layout, choose_run, convert_text, cycle_targets, detect_source  # noqa: E402
 from selection import extend_over_wraps  # noqa: E402
-from detect import load_lms, looks_already_correct  # noqa: E402
+from detect import best_target, load_lms, looks_already_correct, suspect_span  # noqa: E402
 
 APP = "LayoutSwitcher"
 log = logging.getLogger(APP)
@@ -59,6 +62,7 @@ class Last:
     idx: int
     output: str
     at: float
+    keep_tail: int = 0  # chars at the end of `original` that every press leaves as they are
 
 
 class Switcher:
@@ -78,17 +82,31 @@ class Switcher:
             log.info("language models: %s", sorted(self._lms) or "none")
         return self._lms
 
+    def _smart(self, layouts: list[Layout]):
+        """Models for smart run (narrowing the run, guessing the target), unless turned off."""
+        return self._models(layouts) if self.cfg.get("smart_run", True) else {}
+
     def _copies_line(self) -> bool:
         return io.foreground_process() in self.cfg.get("line_copy_apps", [])
 
     def _recent(self) -> bool:
         return bool(self.last) and time.monotonic() - self.last.at < self.cfg.get("cycle_seconds", 10)
 
-    def _start(self, text: str, src: Layout, layouts: list[Layout]) -> tuple[str, Layout]:
+    @staticmethod
+    def _convert(text: str, src: Layout, dst: Layout, keep_tail: int) -> str:
+        cut = len(text) - keep_tail
+        return convert_text(text[:cut], src, dst) + text[cut:]
+
+    def _start(self, text: str, src: Layout, layouts: list[Layout],
+               keep_tail: int = 0) -> tuple[str, Layout]:
         targets = cycle_targets(src, layouts, self.cfg.get("preference", []))
+        lms = self._smart(layouts)
+        guess = best_target(text, layouts, lms) if lms else None
+        targets.sort(key=lambda t: t.name != guess)  # the model's guess first, order kept otherwise
         dst = targets[0]
-        out = convert_text(text, src, dst)
-        self.last = Last(text, src.name, [t.name for t in targets], 0, out, time.monotonic())
+        out = self._convert(text, src, dst, keep_tail)
+        self.last = Last(text, src.name, [t.name for t in targets], 0, out, time.monotonic(),
+                         keep_tail)
         return out, dst
 
     def _cycle(self, layouts: list[Layout]) -> tuple[str, Layout] | None:
@@ -98,7 +116,8 @@ class Switcher:
             return None
         L.idx = (L.idx + 1) % len(L.targets)
         dst = by[L.targets[L.idx]]
-        out = L.original if dst.name == L.src else convert_text(L.original, by[L.src], dst)
+        out = L.original if dst.name == L.src else self._convert(L.original, by[L.src], dst,
+                                                                 L.keep_tail)
         L.output, L.at = out, time.monotonic()
         return out, dst
 
@@ -168,9 +187,16 @@ class Switcher:
                         io.beep()
                         return "no-run"
                     start, src = run
-                    head = prefix[:start]
-                    out, dst = self._start(prefix[start:], src, layouts)
+                    keep_tail = 0
                     status = "run"
+                    lms = self._smart(layouts)
+                    span = suspect_span(prefix[start:], layouts, lms) if lms else None
+                    if span:  # narrow the run to the words that look typed in the wrong layout
+                        keep_tail = len(prefix) - start - span[1]
+                        start += span[0]
+                        status = "smart-run"
+                    head = prefix[:start]
+                    out, dst = self._start(prefix[start:], src, layouts, keep_tail)
                 if not self.paster.paste(head + out):
                     log.warning("app did not take the paste within 8s")
             if self.cfg.get("switch_layout_after", True):
@@ -192,8 +218,44 @@ def setup_logging() -> None:
                         format="%(asctime)s %(levelname)s %(message)s")
 
 
-def run() -> int:
+_crash_file = None  # kept open for the life of the process (faulthandler writes into it)
+
+
+def supervise() -> int:
+    """Run the switcher as a child and restart it if it dies while running.
+
+    Exit 0 = stopped on purpose (stop.cmd / --stop): done. A child that fails within
+    30 s is a start-up problem (hotkey taken, already running, bad config): reporting
+    it once is better than a loop. Otherwise restart, at most 5 times an hour."""
+    import subprocess
     setup_logging()
+    args = [sys.executable, os.path.abspath(__file__)] + [a for a in sys.argv[1:]
+                                                          if a != "--supervise"]
+    restarts: list[float] = []
+    while True:
+        t0 = time.monotonic()
+        code = subprocess.call(args)
+        ran = time.monotonic() - t0
+        if code == 0:
+            return 0
+        if ran < 30:
+            log.error("switcher exited with %s %.0f s after start; not restarting", code, ran)
+            return code
+        now = time.monotonic()
+        restarts = [t for t in restarts if now - t < 3600] + [now]
+        if len(restarts) > 5:
+            log.error("switcher died 6 times within an hour; giving up (see crash.log)")
+            return code
+        log.warning("switcher died (exit %s) after %.0f s; restarting", code, ran)
+        time.sleep(2)
+
+
+def run() -> int:
+    global _crash_file
+    setup_logging()
+    import faulthandler  # a native crash (bad pointer in a Windows call) leaves a stack here
+    _crash_file = open(os.path.join(io.LOG_DIR, "crash.log"), "a", encoding="utf-8")
+    faulthandler.enable(_crash_file)
     try:
         cfg = load_config()
     except Exception as e:  # noqa: BLE001
@@ -235,6 +297,8 @@ def main() -> int:
         return io.stop()
     if "--convert" in sys.argv:
         return convert_once()
+    if "--supervise" in sys.argv:
+        return supervise()
     return run()
 
 

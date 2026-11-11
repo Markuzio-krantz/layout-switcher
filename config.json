@@ -6,6 +6,7 @@
     "ru"
   ],
   "switch_layout_after": true,
+  "smart_run": true,
   "cycle_seconds": 10,
   "line_copy_apps": [
     "code.exe",
