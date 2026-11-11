@@ -233,6 +233,13 @@ def _clear_stop_flag() -> None:
         pass
 
 
+def _start_via_task() -> bool:
+    """Ask Task Scheduler to start the tool (outside any app container)."""
+    import subprocess
+    r = subprocess.run(["schtasks", "/run", "/tn", "LayoutSwitcher Watchdog"], capture_output=True)
+    return r.returncode == 0
+
+
 def ensure() -> int:
     """Watchdog entry (Windows Task Scheduler, every few minutes): start the tool if it
     is not running and the user did not stop it. On 10-11/11 the switcher and its
@@ -252,7 +259,8 @@ def ensure() -> int:
     setup_logging()
     log.warning("watchdog: the switcher was not running and was not stopped by the user; starting it")
     pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
-    args = [pyw if os.path.exists(pyw) else sys.executable, os.path.abspath(__file__), "--supervise"]
+    args = [pyw if os.path.exists(pyw) else sys.executable, os.path.abspath(__file__), "--supervise",
+            "--from-task"]
     DETACHED, NEW_GROUP, BREAKAWAY = 0x00000008, 0x00000200, 0x01000000
     try:
         subprocess.Popen(args, creationflags=DETACHED | NEW_GROUP | BREAKAWAY)
@@ -343,6 +351,15 @@ def main() -> int:
         return ensure()
     if "--convert" in sys.argv:
         return convert_once()
+    if ("--supervise" in sys.argv and "--from-task" not in sys.argv and io.NAME == "windows"
+            and "--debug" not in sys.argv):
+        # Only Task Scheduler starts the real instance. Anything else (start.cmd, the Run key
+        # at logon, a Claude session) may sit inside another app's container, where AppData
+        # writes go to a hidden copy and Windows ends the process with that app (12/11/26:
+        # that is how the tool died twice with nothing logged). So ask the task instead.
+        _clear_stop_flag()  # starting by hand means "run it"
+        if _start_via_task():
+            return 0
     if "--supervise" in sys.argv:
         return supervise()
     return run()

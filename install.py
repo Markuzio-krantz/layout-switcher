@@ -75,9 +75,12 @@ def start_now() -> None:
             os.remove(flag)
         # Through Task Scheduler when the watchdog task exists: then the tool is not a child
         # of this installer or of whatever terminal ran it.
-        if subprocess.run(["schtasks", "/run", "/tn", TASK], capture_output=True).returncode == 0:
+        if os.environ.get("LSW_DIRECT_START") != "1" and \
+                subprocess.run(["schtasks", "/run", "/tn", TASK], capture_output=True).returncode == 0:
             return
-        subprocess.Popen([python(), SWITCHER, "--supervise"], creationflags=0x00000008)  # DETACHED_PROCESS
+        # no task, or this installer already runs outside any app container (LSW_DIRECT_START)
+        subprocess.Popen([python(), SWITCHER, "--supervise", "--from-task"],
+                         creationflags=0x00000008)  # DETACHED_PROCESS
     else:
         subprocess.Popen([python(), SWITCHER, "--supervise"], start_new_session=True, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
